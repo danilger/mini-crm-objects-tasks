@@ -1,5 +1,7 @@
 # Мини-CRM «Объекты и задачи»
 
+Репозиторий: https://github.com/danilger/mini-crm-objects-tasks
+
 Тестовое задание: React + TypeScript + Supabase. Постановщик ведёт объекты (стройки) и задачи; исполнители работают по своим задачам. Права закрыты Row Level Security и RPC-переходами статусов.
 
 ## Стек
@@ -10,9 +12,8 @@
 ## Быстрый старт
 
 1. Создайте проект на [supabase.com](https://supabase.com), выключите публичную регистрацию, создайте 3 пользователей вручную.
-2. В SQL Editor выполните по порядку:
-   - [`supabase/migrations/20260326000000_init.sql`](supabase/migrations/20260326000000_init.sql)
-   - [`supabase/seed.sql`](supabase/seed.sql) — сначала подставьте UUID из Authentication → Users
+2. В SQL Editor выполните целиком [`supabase/all.sql`](supabase/all.sql) (схема + seed).  
+   Первый по дате создания Auth-пользователь станет постановщиком, остальные — исполнителями.
 3. Скопируйте env:
 
 ```bash
