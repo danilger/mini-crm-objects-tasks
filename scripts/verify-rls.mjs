@@ -6,7 +6,6 @@
  *   VITE_SUPABASE_ANON_KEY
  *   VERIFY_MANAGER_EMAIL / VERIFY_MANAGER_PASSWORD
  *   VERIFY_WORKER_EMAIL / VERIFY_WORKER_PASSWORD
- *   VERIFY_OTHER_WORKER_EMAIL / VERIFY_OTHER_WORKER_PASSWORD (optional but recommended)
  */
 import { createClient } from '@supabase/supabase-js'
 
@@ -41,12 +40,16 @@ async function main() {
     required('VERIFY_WORKER_PASSWORD'),
   )
 
-  const { data: allTasks, error: managerTasksErr } = await manager.from('tasks').select('id, assignee_id, status')
+  const workerId = (await worker.auth.getUser()).data.user.id
+
+  const { data: allTasks, error: managerTasksErr } = await manager
+    .from('tasks')
+    .select('id, assignee_id, status, title')
   assert(!managerTasksErr, 'manager can list tasks')
   assert((allTasks?.length ?? 0) > 0, 'seed has tasks')
 
-  const foreign = allTasks.find((t) => t.assignee_id !== (await worker.auth.getUser()).data.user.id)
-  assert(foreign, 'there is a task not assigned to worker1')
+  const foreign = allTasks.find((t) => t.assignee_id !== workerId)
+  assert(!!foreign, 'there is a task not assigned to worker1')
 
   const { data: stolen, error: stealErr } = await worker
     .from('tasks')
@@ -55,37 +58,40 @@ async function main() {
     .maybeSingle()
   assert(!stealErr && !stolen, 'worker cannot read foreign task')
 
-  const { error: badUpdate } = await worker
+  await worker.from('tasks').update({ title: 'hacked' }).eq('id', foreign.id)
+  const { data: stillForeign } = await manager
     .from('tasks')
-    .update({ title: 'hacked' })
+    .select('title')
     .eq('id', foreign.id)
-  // either error or zero rows; PostgREST may return no error with 0 rows
-  const { data: stillForeign } = await manager.from('tasks').select('title').eq('id', foreign.id).single()
+    .single()
   assert(stillForeign?.title !== 'hacked', 'worker cannot update foreign task')
 
-  const { error: directStatus } = await worker
+  await worker.from('tasks').update({ status: 'accepted' }).eq('id', foreign.id)
+  const { data: statusCheck } = await manager
     .from('tasks')
-    .update({ status: 'accepted' })
+    .select('status')
     .eq('id', foreign.id)
-  void directStatus
-  const { data: statusCheck } = await manager.from('tasks').select('status').eq('id', foreign.id).single()
-  assert(statusCheck?.status !== 'accepted' || foreign.status === 'accepted', 'direct status hack blocked')
+    .single()
+  assert(
+    statusCheck?.status === foreign.status,
+    'direct status update blocked or unchanged',
+  )
 
-  const { data: mine } = await worker.from('tasks').select('id, status').limit(1)
-  if (mine?.[0]) {
-    const { error: illegalRpc } = await worker.rpc('transition_task', {
-      p_task_id: mine[0].id,
-      p_new_status: 'accepted',
-      p_comment: null,
-    })
-    assert(!!illegalRpc, 'worker cannot accept own task via RPC')
-  }
+  const { data: mine } = await worker.from('tasks').select('id, status').limit(5)
+  assert((mine?.length ?? 0) > 0, 'worker sees own tasks')
+
+  const { error: illegalRpc } = await worker.rpc('transition_task', {
+    p_task_id: mine[0].id,
+    p_new_status: 'accepted',
+    p_comment: null,
+  })
+  assert(!!illegalRpc, 'worker cannot accept task via RPC')
 
   const { error: historyWrite } = await worker.from('task_status_history').insert({
     task_id: allTasks[0].id,
     from_status: 'new',
     to_status: 'accepted',
-    changed_by: (await worker.auth.getUser()).data.user.id,
+    changed_by: workerId,
     comment: 'forged',
   })
   assert(!!historyWrite, 'worker cannot forge history')

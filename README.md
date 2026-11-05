@@ -54,6 +54,14 @@ VERIFY_WORKER_PASSWORD=...
 
 Смена статуса: только `rpc('transition_task', …)`.
 
+## Тестовые доступы
+
+| Роль | Email | Пароль |
+|------|-------|--------|
+| Постановщик | `manager@manager.com` | `manager123` |
+| Исполнитель 1 | `user1@user.com` | `user123` |
+| Исполнитель 2 | `user2@user.com` | `user123` |
+
 ## Документы для сдачи
 
 - [Объяснение для руководителя](docs/for-manager.md)
