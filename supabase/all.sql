@@ -1,5 +1,5 @@
 -- =============================================================================
--- ONE-SHOT: paste into Supabase → SQL Editor → Run
+-- ONE-SHOT: paste into Supabase → SQL Editor → Run (role: postgres)
 -- =============================================================================
 
 -- Mini-CRM: objects, tasks, roles, RLS, status transitions, immutable history
@@ -318,10 +318,29 @@ revoke all on table public.task_status_history from anon;
 -- SEED
 -- =============================================================================
 
--- Run AFTER init migration, in SQL Editor (role postgres).
--- Expects exactly the Auth users you already created.
--- First created user → manager (постановщик), the rest → workers (исполнители).
+-- Run in SQL Editor as role "postgres" (default).
+-- Prerequisite: Authentication → Users already has your 3 users.
 
+-- 0) Diagnostics (look at Results if something fails)
+do $$
+declare
+  v_auth int;
+  v_profiles int;
+  v_managers int;
+begin
+  select count(*) into v_auth from auth.users;
+  select count(*) into v_profiles from public.profiles;
+  select count(*) into v_managers from public.profiles where role = 'manager';
+
+  raise notice 'auth.users=% profiles=% managers=%', v_auth, v_profiles, v_managers;
+
+  if v_auth = 0 then
+    raise exception
+      'auth.users is empty. Create users in Authentication → Users, then re-run seed.';
+  end if;
+end $$;
+
+-- 1) Profiles: earliest Auth user → manager, others → workers
 insert into public.profiles (id, email, full_name, role)
 select
   s.id,
@@ -347,7 +366,7 @@ set
   full_name = excluded.full_name,
   role = excluded.role;
 
--- Demo objects + tasks in different statuses
+-- 2) Demo objects + tasks
 do $$
 declare
   v_manager uuid;
@@ -358,7 +377,12 @@ declare
   v_obj3 uuid;
   v_t uuid;
   v_workers uuid[];
+  v_auth int;
+  v_profiles int;
 begin
+  select count(*) into v_auth from auth.users;
+  select count(*) into v_profiles from public.profiles;
+
   select id into v_manager
   from public.profiles
   where role = 'manager'
@@ -366,7 +390,9 @@ begin
   limit 1;
 
   if v_manager is null then
-    raise exception 'No manager profile. Create Auth users and re-run seed.';
+    raise exception
+      'No manager profile after sync (auth.users=%, profiles=%). If users exist, paste their UUIDs into the MANUAL block at the bottom of seed.sql',
+      v_auth, v_profiles;
   end if;
 
   select array_agg(id order by created_at)
@@ -375,14 +401,14 @@ begin
   where role = 'worker';
 
   if coalesce(array_length(v_workers, 1), 0) < 1 then
-    raise exception 'Need at least one worker profile.';
+    raise exception 'Need at least one worker profile (auth.users=%).', v_auth;
   end if;
 
   v_w1 := v_workers[1];
   v_w2 := coalesce(v_workers[2], v_workers[1]);
 
-  -- idempotent-ish: wipe previous demo rows if re-seeding
-  delete from public.objects where title in ('ЖК Северный', 'БЦ Горизонт', 'Склад Логистик');
+  delete from public.objects
+  where title in ('ЖК Северный', 'БЦ Горизонт', 'Склад Логистик');
 
   insert into public.objects (title, address, created_by)
   values ('ЖК Северный', 'ул. Строителей, 1', v_manager)
@@ -396,11 +422,9 @@ begin
   values ('Склад Логистик', 'промзона 4', v_manager)
   returning id into v_obj3;
 
-  -- new
   insert into public.tasks (object_id, title, description, assignee_id, author_id, status)
   values (v_obj1, 'Разметка фундамента', 'Проверить оси на участке А', v_w1, v_manager, 'new');
 
-  -- in_progress
   insert into public.tasks (object_id, title, description, assignee_id, author_id, status)
   values (v_obj1, 'Заливка бетона', 'Участок Б', v_w1, v_manager, 'new')
   returning id into v_t;
@@ -409,7 +433,6 @@ begin
   insert into public.task_status_history (task_id, from_status, to_status, changed_by, comment)
   values (v_t, 'new', 'in_progress', v_w1, null);
 
-  -- in_review
   insert into public.tasks (object_id, title, description, assignee_id, author_id, status)
   values (v_obj2, 'Электромонтаж 2 этаж', 'Щитовая и стояки', v_w2, v_manager, 'new')
   returning id into v_t;
@@ -420,7 +443,6 @@ begin
     (v_t, 'new', 'in_progress', v_w2, null),
     (v_t, 'in_progress', 'in_review', v_w2, null);
 
-  -- rework
   insert into public.tasks (object_id, title, description, assignee_id, author_id, status)
   values (v_obj2, 'Гидроизоляция кровли', 'Парапет и примыкания', v_w2, v_manager, 'new')
   returning id into v_t;
@@ -432,7 +454,6 @@ begin
     (v_t, 'in_progress', 'in_review', v_w2, null),
     (v_t, 'in_review', 'rework', v_manager, 'Не закрыты примыкания у вентиляционных шахт');
 
-  -- accepted
   insert into public.tasks (object_id, title, description, assignee_id, author_id, status)
   values (v_obj3, 'Установка ворот', 'Въездная группа', v_w1, v_manager, 'new')
   returning id into v_t;
@@ -445,7 +466,19 @@ begin
     (v_t, 'in_review', 'accepted', v_manager, null);
 end $$;
 
--- Quick check
 select id, email, full_name, role from public.profiles order by created_at;
 select title, address from public.objects order by created_at;
 select title, status from public.tasks order by created_at;
+
+-- ---------------------------------------------------------------------------
+-- MANUAL fallback (only if auto-sync failed): uncomment and paste real UUIDs
+-- from Authentication → Users, then run this block alone, then re-run section 2.
+-- ---------------------------------------------------------------------------
+/*
+insert into public.profiles (id, email, full_name, role) values
+  ('MANAGER_UUID', 'manager@example.com', 'Постановщик', 'manager'),
+  ('WORKER1_UUID', 'worker1@example.com', 'Исполнитель 1', 'worker'),
+  ('WORKER2_UUID', 'worker2@example.com', 'Исполнитель 2', 'worker')
+on conflict (id) do update
+set email = excluded.email, full_name = excluded.full_name, role = excluded.role;
+*/
