@@ -1,0 +1,4 @@
+# Minimal config marker for Supabase CLI (optional).
+# Schema lives in migrations/; apply via SQL Editor or `supabase db push` when linked.
+
+project_id = "mini-crm-objects-tasks"
