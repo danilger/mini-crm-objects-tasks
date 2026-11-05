@@ -1,60 +1,81 @@
 # Мини-CRM «Объекты и задачи»
 
-Репозиторий: https://github.com/danilger/mini-crm-objects-tasks
+Тестовое задание для 2B Studio: небольшая CRM строительной компании на **React + TypeScript + Supabase**.
 
-Тестовое задание: React + TypeScript + Supabase. Постановщик ведёт объекты (стройки) и задачи; исполнители работают по своим задачам. Права закрыты Row Level Security и RPC-переходами статусов.
+Постановщик ведёт объекты (стройки) и задачи. Исполнители берут задачи в работу и отправляют на проверку. Права доступа и переходы статусов защищены **на уровне Postgres (RLS + RPC)**, а не только в интерфейсе.
 
-## Стек
+- Репозиторий: https://github.com/danilger/mini-crm-objects-tasks
+- Демо (VPS): http://144.31.193.95:8788
+- Объяснение для руководителя (без жаргона): [`docs/for-manager.md`](docs/for-manager.md)
+- Решения и допущения: [`docs/decisions.md`](docs/decisions.md)
 
-- Vite, React, TypeScript, Tailwind CSS, React Router
-- Supabase Auth + Postgres (RLS, triggers, `transition_task`)
+---
 
-## Быстрый старт
+## Как запустить проект
 
-1. Создайте проект на [supabase.com](https://supabase.com), выключите публичную регистрацию, создайте 3 пользователей вручную.
-2. В SQL Editor выполните целиком [`supabase/all.sql`](supabase/all.sql) (схема + seed).  
-   Первый по дате создания Auth-пользователь станет постановщиком, остальные — исполнителями.
-3. Скопируйте env:
+### 1. Требования
+
+- Node.js 20+
+- Аккаунт [Supabase](https://supabase.com) (бесплатный тариф)
+
+### 2. База данных
+
+1. Создайте проект Supabase.
+2. В **Authentication → Users** создайте пользователей вручную (email + пароль).  
+   Публичную регистрацию отключите: **Authentication → Providers → Email → Disable sign ups**.
+3. В **SQL Editor** выполните файл [`supabase/all.sql`](supabase/all.sql) целиком (роль `postgres`).  
+   Он создаёт схему, RLS, функцию смены статуса и демо-данные.
+
+Либо по отдельности:
+
+1. [`supabase/migrations/20260326000000_init.sql`](supabase/migrations/20260326000000_init.sql) — схема и безопасность  
+2. [`supabase/seed.sql`](supabase/seed.sql) — профили из `auth.users` + демо объекты/задачи  
+
+Правило сида: **первый созданный Auth-пользователь** становится постановщиком (`manager`), остальные — исполнителями (`worker`).
+
+### 3. Фронтенд
 
 ```bash
+git clone https://github.com/danilger/mini-crm-objects-tasks.git
+cd mini-crm-objects-tasks
 cp .env.example .env
 ```
 
-Заполните `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` (Project Settings → API).
+В `.env` укажите ключи из **Project Settings → API**:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_or_publishable_key
+```
+
+Во фронт попадает только **anon / publishable** ключ. `service_role` не использовать и не коммитить.
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Скрипты
+Откройте URL из терминала (обычно `http://localhost:5173`).
+
+### 4. Скрипты
 
 | Команда | Назначение |
 |---------|------------|
 | `npm run dev` | Локальная разработка |
 | `npm run build` | Сборка в `dist/` |
-| `npm run preview` | Просмотр сборки |
-| `node --env-file=.env scripts/verify-rls.mjs` | Проверка RLS (нужны VERIFY_* в `.env`) |
+| `npm run preview` | Просмотр production-сборки |
+| `npm run verify:rls` | Проверка, что RLS нельзя обойти через API |
 
-Пример для verify:
+Для `verify:rls` добавьте в `.env`:
 
 ```env
-VERIFY_MANAGER_EMAIL=manager@example.com
-VERIFY_MANAGER_PASSWORD=...
-VERIFY_WORKER_EMAIL=worker1@example.com
-VERIFY_WORKER_PASSWORD=...
+VERIFY_MANAGER_EMAIL=manager@manager.com
+VERIFY_MANAGER_PASSWORD=manager123
+VERIFY_WORKER_EMAIL=user1@user.com
+VERIFY_WORKER_PASSWORD=user123
 ```
 
-## Роли и статусы
-
-- `manager` — постановщик: CRUD объектов/задач, приём / возврат с проверки
-- `worker` — исполнитель: свои задачи; переходы «в работу» и «на проверку»
-
-Статусы: `new` → `in_progress` → `in_review` → `accepted`, ветка `in_review` → `rework` → `in_progress`.
-
-Смена статуса: только `rpc('transition_task', …)`.
-
-## Тестовые доступы
+### 5. Демо-доступы (текущий облачный проект)
 
 | Роль | Email | Пароль |
 |------|-------|--------|
@@ -62,13 +83,169 @@ VERIFY_WORKER_PASSWORD=...
 | Исполнитель 1 | `user1@user.com` | `user123` |
 | Исполнитель 2 | `user2@user.com` | `user123` |
 
-## Документы для сдачи
+---
 
-- [Объяснение для руководителя](docs/for-manager.md)
-- [Решения и допущения](docs/decisions.md)
+## Стек
 
-## Безопасность
+| Слой | Технологии |
+|------|------------|
+| UI | Vite, React 19, TypeScript, Tailwind CSS, React Router |
+| Backend | Supabase Auth, PostgreSQL, PostgREST (Data API) |
+| Безопасность | Row Level Security, `SECURITY DEFINER` RPC, триггеры |
 
-- Во фронте только anon-ключ
-- `service_role` не используется в приложении и не должен попадать в репозиторий
-- История статусов неизменяема для клиентов API
+Отдельного Node-бэкенда нет: браузер ходит в Supabase с JWT пользователя, Postgres сам решает, что можно читать и менять.
+
+---
+
+## Как устроена система
+
+### Роли
+
+| Код в БД | Кто это | Что может |
+|----------|---------|-----------|
+| `manager` | Постановщик | Все объекты и задачи; создание/редактирование/удаление; приём работы и возврат на доработку |
+| `worker` | Исполнитель | Только **свои** задачи и объекты, где есть его задачи; переходы «в работу» / «на проверку» |
+
+Роль хранится в таблице `profiles` (1:1 с `auth.users`), не во фронте. UI лишь прячет недоступные кнопки; реальная защита — в политиках RLS и в RPC.
+
+### Объекты и задачи
+
+- **Объект** — стройка: название, адрес, автор.
+- **Задача** — работа по объекту: название, описание, исполнитель, автор, статус, дата создания.
+- В карточке объекта — список задач. В карточке задачи — данные, доступные действия, история статусов.
+- У исполнителя есть экран **«Мои задачи»**.
+
+### Жизненный цикл статуса
+
+```text
+Новая (new)
+  └─(исполнитель)→ В работе (in_progress)
+                     └─(исполнитель)→ На проверке (in_review)
+                                        ├─(постановщик)→ Принята (accepted)
+                                        └─(постановщик + комментарий)→ На доработке (rework)
+                                                                         └─(исполнитель)→ В работе
+```
+
+Любой другой переход **запрещён** на стороне базы.
+
+### Экраны
+
+| Маршрут | Назначение |
+|---------|------------|
+| `/login` | Вход по email/паролю |
+| `/objects` | Список объектов |
+| `/objects/:id` | Карточка объекта + задачи (+ формы для постановщика) |
+| `/tasks/:id` | Карточка задачи, действия, история |
+| `/my-tasks` | Задачи текущего исполнителя |
+
+---
+
+## Как защищены данные (детально)
+
+Требование ТЗ: правила должны работать даже при прямых запросах к Supabase API, в обход UI.
+
+### 1. Row Level Security (RLS)
+
+На таблицах `profiles`, `objects`, `tasks`, `task_status_history` включён RLS.
+
+Примеры правил:
+
+- **objects**: постановщик видит и меняет всё; исполнитель — `SELECT` только если есть задача с `assignee_id = auth.uid()`.
+- **tasks**: постановщик — полный доступ; исполнитель — только строки, где он исполнитель. Создавать/удалять задачи исполнитель не может.
+- **task_status_history**: клиентам разрешён только `SELECT` по видимым задачам. `INSERT` / `UPDATE` / `DELETE` через API недоступны (нет GRANT и нет политик на запись).
+
+Хелперы `is_manager()`, `can_see_task()` — `SECURITY DEFINER` с фиксированным `search_path`, чтобы политики были читаемыми и безопасными.
+
+### 2. Смена статуса только через RPC `transition_task`
+
+Прямой `UPDATE tasks SET status = ...` блокируется триггером `enforce_task_status_via_rpc`, если не выставлен служебный флаг сессии.
+
+Единственный легальный путь для клиента:
+
+```ts
+await supabase.rpc('transition_task', {
+  p_task_id: taskId,
+  p_new_status: 'in_review', // или in_progress / accepted / rework
+  p_comment: commentOrNull,
+})
+```
+
+Внутри функции (тоже `SECURITY DEFINER`):
+
+1. Проверка, что пользователь залогинен.
+2. Блокировка строки задачи (`FOR UPDATE`).
+3. Проверка пары «текущий статус → новый» и роли / назначения.
+4. Для `in_review → rework` — обязательный непустой комментарий.
+5. Обновление статуса и запись в `task_status_history`.
+
+Поэтому исполнитель не сможет «принять» задачу или перепрыгнуть статусы, даже вызвав RPC вручную.
+
+### 3. История статусов
+
+- При создании задачи триггер пишет запись `null → new`.
+- При каждом `transition_task` — ещё одна запись: кто, когда, откуда → куда, комментарий.
+- Клиент историю **не пишет и не правит** — только читает. Подделать аудит через API нельзя.
+
+### 4. Auth и секреты
+
+- Открытая регистрация отключена; пользователи создаются в Dashboard.
+- Во фронтенде и в репозитории только публичный ключ (anon/publishable).
+- `service_role` в приложении не используется.
+
+---
+
+## Структура репозитория
+
+```text
+src/
+  auth/           # сессия и профиль текущего пользователя
+  components/     # layout, защита маршрутов, бейдж статуса
+  pages/          # login, objects, object detail, task detail, my-tasks
+  lib/            # supabase client, типы, подписи статусов, доступные переходы для UI
+supabase/
+  migrations/     # DDL + RLS + RPC (источник правды для схемы)
+  seed.sql        # профили + демо-данные
+  all.sql         # миграция + seed одним файлом для SQL Editor
+docs/             # текст для руководителя и список допущений
+scripts/verify-rls.mjs
+```
+
+Миграции лежат в `supabase/migrations/` — это то, что просят в ТЗ: схема воспроизводима из репозитория.
+
+---
+
+## Поток данных (схема)
+
+```text
+Браузер (React)
+    │  signInWithPassword / from('…').select / rpc('transition_task')
+    ▼
+Supabase Auth  ──JWT──►  Data API (PostgREST)
+                              │
+                              ▼
+                         PostgreSQL
+                    ┌─────────┴─────────┐
+                    │ RLS policies      │
+                    │ triggers          │
+                    │ transition_task() │
+                    └───────────────────┘
+```
+
+UI показывает только допустимые кнопки (`availableTransitions` в `src/lib/types.ts`), но отказ при нарушении всегда приходит из Postgres.
+
+---
+
+## Что проверить руками перед сдачей
+
+1. Войти постановщиком — видны все объекты и задачи, можно создать объект/задачу.
+2. Войти исполнителем 1 — видны только его задачи; чужие не открываются.
+3. Исполнитель: `Новая → В работе → На проверке`.
+4. Постановщик: принять или вернуть на доработку **с комментарием**.
+5. В карточке задачи видна история.
+6. (Опционально) `npm run verify:rls` — автоматическая проверка обхода UI.
+
+---
+
+## Лицензия / назначение
+
+Учебное / тестовое задание. Не содержит production-секретов `service_role`.
